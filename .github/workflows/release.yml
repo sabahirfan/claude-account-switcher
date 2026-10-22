@@ -1,0 +1,76 @@
+name: Release
+
+# Push a tag like v1.0.0 to publish to Open VSX and npm, and attach the .vsix to a GitHub release.
+# Run it by hand with dry_run to build and check everything without publishing.
+#
+# npm uses trusted publishing (no token): configure it on npmjs.com for this workflow file.
+# The VS Code Marketplace step runs only when a VSCE_PAT secret exists; otherwise upload the
+# .vsix from the GitHub release at https://marketplace.visualstudio.com/manage.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and check only; publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # GitHub release
+  id-token: write # npm trusted publishing and provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      VSIX: dist/account-switcher-for-claude-code.vsix
+      PUBLISH: ${{ github.event_name == 'push' || !inputs.dry_run }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs npm 11.5.1+, which Node 24 ships with.
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Tag matches package.json version
+        if: github.event_name == 'push'
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+
+      - run: npm run package
+      - run: node scripts/pack-npm.mjs
+      - run: npm publish --dry-run
+        working-directory: dist/npm
+
+      - name: VS Code Marketplace
+        if: env.PUBLISH == 'true' && env.VSCE_PAT != ''
+        run: npx vsce publish --packagePath "$VSIX"
+
+      - name: Open VSX
+        if: env.PUBLISH == 'true'
+        run: npx ovsx publish "$VSIX"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      - name: npm
+        if: env.PUBLISH == 'true'
+        working-directory: dist/npm
+        run: |
+          # The first version is published by hand, since trusted publishing needs the package to exist.
+          if npm view "$(node -p 'require("./package.json").name')@$(node -p 'require("./package.json").version')" version >/dev/null 2>&1; then
+            echo "This version is already on npm; skipping."
+          else
+            npm publish --access public
+          fi
+
+      - name: GitHub release
+        if: env.PUBLISH == 'true' && github.event_name == 'push'
+        run: gh release create "$GITHUB_REF_NAME" "$VSIX" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

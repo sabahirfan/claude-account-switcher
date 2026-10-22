@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
+import { diagnose } from "./core/doctor.ts";
+import { claudePaths } from "./core/paths.ts";
 import { claudeBinary, defaultOptions, Switcher } from "./core/switcher.ts";
 
 const USAGE = `ccswitch — switch the Claude Code account
@@ -11,6 +13,7 @@ const USAGE = `ccswitch — switch the Claude Code account
   ccswitch save               save the signed-in account to the list
   ccswitch add                save the current account, then sign in to another one
   ccswitch remove <n|email>   remove a saved account (you stay signed in)
+  ccswitch doctor             show where the logins are kept and check them (prints no secrets)
 
 After a switch, reload VS Code windows (Developer: Reload Window) and restart terminal sessions.`;
 
@@ -27,7 +30,8 @@ async function confirm(question: string): Promise<boolean> {
 }
 
 async function main(argv: string[]): Promise<number> {
-  const sw = new Switcher(defaultOptions());
+  const paths = claudePaths();
+  const sw = new Switcher(defaultOptions(paths));
   const [cmd = "list", arg] = argv;
 
   switch (cmd) {
@@ -47,7 +51,7 @@ async function main(argv: string[]): Promise<number> {
         return 1;
       }
       console.log(label(cur));
-      if (!cur.consistent) console.log("Warning: the Keychain login belongs to another organization. Restart Claude sessions.");
+      if (!cur.consistent) console.log("Warning: the active login belongs to another organization. Restart Claude sessions.");
       return 0;
     }
     case "save": {
@@ -85,6 +89,11 @@ async function main(argv: string[]): Promise<number> {
       sw.remove(target.id);
       console.log(`Removed ${label(target)}`);
       return 0;
+    }
+    case "doctor": {
+      const lines = diagnose(sw, paths, claudeBinary());
+      lines.forEach((l) => console.log(l));
+      return lines.some((l) => l.startsWith("!!")) ? 1 : 0;
     }
     case "help":
     case "-h":

@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# Committed for reproducible CI and npm provenance, despite the global ignore.
+!package-lock.json

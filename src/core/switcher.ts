@@ -3,17 +3,19 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { macKeychain, type Keychain } from "./keychain.ts";
-import { readOauthAccount, writeOauthAccount, type OAuthAccount } from "./claudeJson.ts";
+import { fileKeychain } from "./fileStore.ts";
+import { fileLogin, keychainLogin, type ActiveLogin } from "./login.ts";
+import { claudePaths, type ClaudePaths } from "./paths.ts";
+import { profileIsNewer, readOauthAccount, writeOauthAccount, type OAuthAccount } from "./claudeJson.ts";
 import { accountId, Vault, type SavedAccount } from "./vault.ts";
 
-/** Claude Code's active login slot. */
-export const ACTIVE_SERVICE = "Claude Code-credentials";
-
 export interface SwitcherOptions {
-  keychain: Keychain;
+  /** Claude Code's active login. */
+  login: ActiveLogin;
+  /** Where saved logins are kept. */
+  secrets: Keychain;
   claudeJsonPath: string;
   vaultDir: string;
-  activeService?: string;
   vaultService?: string;
   /** Running Claude Code processes other than this one. */
   claudeProcesses?: () => number[];
@@ -23,7 +25,7 @@ export interface Current {
   id: string;
   email: string;
   orgName: string;
-  /** False when the Keychain slot holds a login for a different org than ~/.claude.json says. */
+  /** False when the active login is for a different org than ~/.claude.json says. */
   consistent: boolean;
 }
 
@@ -33,43 +35,57 @@ export interface SwitchResult {
   warnings: string[];
 }
 
-export function defaultOptions(): SwitcherOptions {
+export function defaultOptions(paths: ClaudePaths = claudePaths()): SwitcherOptions {
+  const vaultDir = join(homedir(), ".claude-account-switcher");
+  const keychain = process.platform === "darwin" ? macKeychain() : null;
   return {
-    keychain: macKeychain(),
-    claudeJsonPath: join(homedir(), ".claude.json"),
-    vaultDir: join(homedir(), ".claude-account-switcher"),
+    login: activeLogin(paths, keychain),
+    secrets: keychain ?? fileKeychain(join(vaultDir, "secrets")),
+    claudeJsonPath: paths.claudeJsonPath,
+    vaultDir,
     claudeProcesses: runningClaudeProcesses,
   };
+}
+
+function activeLogin(paths: ClaudePaths, keychain: Keychain | null): ActiveLogin {
+  // On macOS Claude Code uses the Keychain, and falls back to the file only when the Keychain fails.
+  if (keychain && (keychain.accountOf(paths.keychainService) !== null || !existsSync(paths.credentialsFile))) {
+    return keychainLogin(keychain, paths.keychainService, paths.keychainAccount);
+  }
+  return fileLogin(paths.credentialsFile);
 }
 
 export class Switcher {
   readonly vault: Vault;
   private opts: SwitcherOptions;
-  private keychain: Keychain;
-  private activeService: string;
 
   constructor(opts: SwitcherOptions) {
     this.opts = opts;
-    this.keychain = opts.keychain;
-    this.activeService = opts.activeService ?? ACTIVE_SERVICE;
-    this.vault = new Vault(opts.keychain, opts.vaultDir, opts.vaultService);
+    this.vault = new Vault(opts.secrets, opts.vaultDir, opts.vaultService);
+  }
+
+  get loginLocation(): string {
+    return this.opts.login.location;
   }
 
   private oauthAccount(): OAuthAccount | null {
     return readOauthAccount(this.opts.claudeJsonPath);
   }
 
-  /** The raw credentials JSON in the active slot. */
+  /** The raw credentials JSON of the active login. */
   activeSecret(): string | null {
-    const account = this.keychain.accountOf(this.activeService);
-    return account === null ? null : this.keychain.read(this.activeService, account);
+    return this.opts.login.read();
   }
 
+  /** Also brings the saved details of the signed-in account up to date. */
   current(): Current | null {
     const acct = this.oauthAccount();
     if (!acct) return null;
+    const id = accountId(acct);
+    const saved = this.vault.get(id);
+    if (saved && profileIsNewer(acct, saved.oauthAccount)) this.vault.updateProfile(acct);
     return {
-      id: accountId(acct),
+      id,
       email: acct.emailAddress,
       orgName: acct.organizationName ?? "",
       consistent: slotMatches(this.activeSecret(), acct),
@@ -84,15 +100,16 @@ export class Switcher {
       .sort((a, b) => a.email.localeCompare(b.email) || a.orgName.localeCompare(b.orgName));
   }
 
-  /** Store the active login in the vault. Refuses when the slot and ~/.claude.json disagree. */
+  /** Store the active login in the vault. Refuses when the login and ~/.claude.json disagree. */
   saveCurrent(): SavedAccount {
     const acct = this.oauthAccount();
-    if (!acct) throw new Error("Not signed in to Claude Code (no oauthAccount in ~/.claude.json)");
+    if (!acct) throw new Error(`Not signed in to Claude Code (no oauthAccount in ${this.opts.claudeJsonPath})`);
     const secret = this.activeSecret();
-    if (!secret) throw new Error(`No "${this.activeService}" item in the Keychain`);
+    if (!secret) throw new Error(`No Claude Code login found (${this.opts.login.location})`);
+    checkLoginFormat(secret, this.opts.login.location);
     if (!slotMatches(secret, acct)) {
       throw new Error(
-        `The active Keychain login belongs to a different organization than ${acct.emailAddress}. ` +
+        `The active Claude Code login belongs to a different organization than ${acct.emailAddress}. ` +
           "Restart running Claude sessions, sign in again, then save.",
       );
     }
@@ -118,7 +135,8 @@ export class Switcher {
     const target = this.vault.get(id);
     if (!target) throw new Error(`No saved account with id ${id}`);
     const secret = this.vault.secret(id);
-    if (!secret) throw new Error(`The saved login for ${target.email} is missing from the Keychain; add it again`);
+    if (!secret) throw new Error(`The saved login for ${target.email} is missing; add the account again`);
+    checkLoginFormat(secret, `the saved login for ${target.email}`);
 
     const warnings: string[] = [];
     let from: SavedAccount | null = null;
@@ -134,8 +152,7 @@ export class Switcher {
       }
     }
 
-    const slotAccount = this.keychain.accountOf(this.activeService) ?? process.env.USER ?? "claude";
-    this.keychain.write(this.activeService, slotAccount, secret);
+    this.opts.login.write(secret);
     writeOauthAccount(this.opts.claudeJsonPath, target.oauthAccount);
 
     const others = this.opts.claudeProcesses?.() ?? [];
@@ -153,6 +170,19 @@ export class Switcher {
   }
 }
 
+/** Refuse to save or restore a login whose shape this version doesn't know. */
+function checkLoginFormat(secret: string, where: string): void {
+  let parsed: { claudeAiOauth?: unknown } | null = null;
+  try {
+    parsed = JSON.parse(secret);
+  } catch {
+    // Reported below.
+  }
+  if (!parsed || typeof parsed.claudeAiOauth !== "object" || parsed.claudeAiOauth === null) {
+    throw new Error(`Unsupported Claude Code login format in ${where}; this version of the switcher may be out of date`);
+  }
+}
+
 function slotMatches(secret: string | null, acct: OAuthAccount): boolean {
   if (!secret) return false;
   try {
@@ -165,6 +195,16 @@ function slotMatches(secret: string | null, acct: OAuthAccount): boolean {
 
 /** PIDs of running `claude` executables other than this process. */
 export function runningClaudeProcesses(): number[] {
+  if (process.platform === "win32") {
+    const res = spawnSync("tasklist", ["/FO", "CSV", "/NH", "/FI", "IMAGENAME eq claude.exe"], { encoding: "utf8" });
+    if (res.status !== 0) return [];
+    return res.stdout
+      .split(/\r?\n/)
+      .map((line) => /^"claude\.exe","(\d+)"/i.exec(line))
+      .filter((m): m is RegExpExecArray => !!m)
+      .map((m) => Number(m[1]))
+      .filter((pid) => pid !== process.pid);
+  }
   const res = spawnSync("/bin/ps", ["-axo", "pid=,comm="], { encoding: "utf8" });
   if (res.status !== 0) return [];
   return res.stdout
@@ -175,18 +215,25 @@ export function runningClaudeProcesses(): number[] {
     .filter((pid) => pid !== process.pid);
 }
 
-/** Newest VS Code extension's bundled claude binary, else `claude` from PATH. */
-export function claudeBinary(): string {
-  const extDir = join(homedir(), ".vscode", "extensions");
-  if (existsSync(extDir)) {
-    const versions = readdirSync(extDir)
-      .filter((d) => d.startsWith("anthropic.claude-code-"))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-      .reverse();
-    for (const d of versions) {
-      const bin = join(extDir, d, "resources", "native-binary", "claude");
-      if (existsSync(bin)) return bin;
+const EDITOR_EXTENSION_DIRS = [".vscode", ".vscode-insiders", ".cursor", ".windsurf", ".vscode-oss"];
+
+/**
+ * The claude binary bundled with the Claude Code extension: the one at `extensionPath` if given,
+ * else the newest install across VS Code, Insiders, Cursor, Windsurf and VSCodium; else `claude` from PATH.
+ */
+export function claudeBinary(extensionPath?: string): string {
+  const bundled = (dir: string) =>
+    join(dir, "resources", "native-binary", process.platform === "win32" ? "claude.exe" : "claude");
+  if (extensionPath && existsSync(bundled(extensionPath))) return bundled(extensionPath);
+
+  const installs: string[] = [];
+  for (const editor of EDITOR_EXTENSION_DIRS) {
+    const extDir = join(homedir(), editor, "extensions");
+    if (!existsSync(extDir)) continue;
+    for (const d of readdirSync(extDir)) {
+      if (d.startsWith("anthropic.claude-code-")) installs.push(join(extDir, d));
     }
   }
-  return "claude";
+  installs.sort((a, b) => basename(b).localeCompare(basename(a), undefined, { numeric: true }));
+  return installs.map(bundled).find((bin) => existsSync(bin)) ?? "claude";
 }

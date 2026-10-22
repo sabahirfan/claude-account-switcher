@@ -1,29 +1,44 @@
 {
-  "name": "claude-account-switcher",
-  "displayName": "Claude Account Switcher",
-  "description": "Switch the Claude Code account from the status bar; add and remove saved accounts.",
-  "version": "0.1.0",
-  "publisher": "sabah-local",
+  "name": "account-switcher-for-claude-code",
+  "displayName": "ccswitch: Accounts for Claude Code",
+  "description": "Switch between your Claude Code accounts from the status bar or the ccswitch command. Not affiliated with Anthropic.",
+  "version": "1.0.0",
+  "publisher": "sabahirfan",
   "private": true,
   "license": "MIT",
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/sabahirfan/claude-account-switcher.git"
   },
-  "engines": {
-    "vscode": "^1.90.0",
-    "node": ">=22.6"
+  "bugs": {
+    "url": "https://github.com/sabahirfan/claude-account-switcher/issues"
   },
-  "os": [
-    "darwin"
-  ],
+  "homepage": "https://github.com/sabahirfan/claude-account-switcher#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
   "categories": [
     "Other"
   ],
-  "main": "./dist/extension.js",
-  "bin": {
-    "ccswitch": "./dist/cli.js"
+  "keywords": [
+    "claude",
+    "claude code",
+    "account",
+    "switch",
+    "multiple accounts",
+    "login"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
   },
+  "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -31,12 +46,12 @@
     "commands": [
       {
         "command": "claudeAccounts.pick",
-        "title": "Switch Account\u2026",
+        "title": "Switch Account…",
         "category": "Claude Accounts"
       },
       {
         "command": "claudeAccounts.add",
-        "title": "Add New Account\u2026",
+        "title": "Add New Account…",
         "category": "Claude Accounts"
       },
       {
@@ -46,7 +61,12 @@
       },
       {
         "command": "claudeAccounts.remove",
-        "title": "Remove Account\u2026",
+        "title": "Remove Account…",
+        "category": "Claude Accounts"
+      },
+      {
+        "command": "claudeAccounts.diagnose",
+        "title": "Diagnose",
         "category": "Claude Accounts"
       }
     ]
@@ -54,15 +74,17 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
-    "package": "npm run build && vsce package --no-dependencies -o dist/claude-account-switcher.vsix",
-    "install-local": "npm run package && \"${VSCODE_CLI:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code}\" --install-extension dist/claude-account-switcher.vsix --force && ln -sf \"$PWD/dist/cli.js\" /usr/local/bin/ccswitch"
+    "test": "node --experimental-strip-types --no-warnings --test \"test/*.test.ts\"",
+    "package": "npm run build && vsce package --no-dependencies -o dist/account-switcher-for-claude-code.vsix",
+    "pack-npm": "npm run build && node scripts/pack-npm.mjs",
+    "install-local": "npm run package && \"${VSCODE_CLI:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code}\" --install-extension dist/account-switcher-for-claude-code.vsix --force && ln -sf \"$PWD/dist/cli.js\" /usr/local/bin/ccswitch"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/vscode": "~1.90.0",
     "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.24.0",
+    "ovsx": "^1.3.0",
     "typescript": "^5.7.0"
   }
 }

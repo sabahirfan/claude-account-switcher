@@ -1,9 +1,12 @@
 import { unwatchFile, watchFile } from "node:fs";
 import * as vscode from "vscode";
+import { diagnose } from "./core/doctor.ts";
+import { claudePaths, type ClaudePaths } from "./core/paths.ts";
 import { claudeBinary, defaultOptions, Switcher, type Current } from "./core/switcher.ts";
 import type { SavedAccount } from "./core/vault.ts";
 
 let sw: Switcher;
+let paths: ClaudePaths;
 let status: vscode.StatusBarItem;
 let lastId: string | undefined;
 /** Set while "Add new account" waits for the sign-in terminal to change the active login. */
@@ -14,7 +17,8 @@ function label(a: { email: string; orgName: string }) {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  const opts = defaultOptions();
+  paths = claudePaths();
+  const opts = defaultOptions(paths);
   sw = new Switcher(opts);
 
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -38,6 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("claudeAccounts.add", addNew),
     vscode.commands.registerCommand("claudeAccounts.save", saveCurrent),
     vscode.commands.registerCommand("claudeAccounts.remove", removeAccount),
+    vscode.commands.registerCommand("claudeAccounts.diagnose", showDiagnosis),
   );
   refresh();
 }
@@ -58,12 +63,19 @@ function refresh() {
     status.text = `${cur.consistent ? "$(account)" : "$(warning)"} ${cur.email}`;
     status.tooltip = cur.consistent
       ? `Claude account: ${label(cur)}\nClick to switch`
-      : `Claude account: ${label(cur)}\nThe Keychain login belongs to another organization — restart Claude sessions or switch again`;
+      : `Claude account: ${label(cur)}\nThe active login belongs to another organization — restart Claude sessions or switch again`;
   }
   if (cur?.id !== lastId) {
+    const previous = lastId;
     lastId = cur?.id;
-    finishPendingAdd(cur);
+    if (pendingAdd) finishPendingAdd(cur);
+    // The account changed in another window or a terminal; this window's Claude still uses the old one.
+    else if (previous !== undefined && cur) void promptReload(`The Claude account changed to ${label(cur)}.`, "Reload this window so Claude uses it.");
   }
+}
+
+function claudeBinaryForThisEditor() {
+  return claudeBinary(vscode.extensions.getExtension("anthropic.claude-code")?.extensionPath);
 }
 
 function finishPendingAdd(cur: Current | null) {
@@ -118,6 +130,7 @@ async function switchTo(a: SavedAccount & { active: boolean }) {
   if (a.active) return;
   try {
     const { to, warnings } = sw.switchTo(a.id);
+    lastId = to.id;
     refresh();
     // This window's own Claude processes restart on reload, so only mention the warning in the log.
     if (warnings.length) console.warn(`[claude-accounts] ${warnings.join(" ")}`);
@@ -127,12 +140,11 @@ async function switchTo(a: SavedAccount & { active: boolean }) {
   }
 }
 
-async function promptReload(message: string) {
-  const choice = await vscode.window.showInformationMessage(
-    `${message} Other open windows and terminal sessions need a reload or restart too.`,
-    "Reload now",
-    "Later",
-  );
+async function promptReload(
+  message: string,
+  next = "Other open windows and terminal sessions need a reload or restart too.",
+) {
+  const choice = await vscode.window.showInformationMessage(`${message} ${next}`, "Reload now", "Later");
   if (choice === "Reload now") await vscode.commands.executeCommand("workbench.action.reloadWindow");
 }
 
@@ -158,7 +170,7 @@ async function addNew() {
   }
   const terminal = vscode.window.createTerminal({
     name: "Claude sign-in",
-    shellPath: claudeBinary(),
+    shellPath: claudeBinaryForThisEditor(),
     shellArgs: ["auth", "login"],
   });
   terminal.show();
@@ -183,4 +195,17 @@ async function removeAccount() {
   sw.remove(choice.a.id);
   refresh();
   vscode.window.showInformationMessage(`Removed ${label(choice.a)}.`);
+}
+
+let diagnosisChannel: vscode.OutputChannel | undefined;
+
+function showDiagnosis() {
+  diagnosisChannel ??= vscode.window.createOutputChannel("Claude Accounts");
+  diagnosisChannel.clear();
+  try {
+    diagnose(sw, paths, claudeBinaryForThisEditor()).forEach((l) => diagnosisChannel!.appendLine(l));
+  } catch (e) {
+    diagnosisChannel.appendLine(`!!  ${(e as Error).message}`);
+  }
+  diagnosisChannel.show();
 }

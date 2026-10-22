@@ -1,4 +1,5 @@
-import { chmodSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { writeFileAtomic } from "./fs.ts";
 
 /** The part of ~/.claude.json → oauthAccount the switcher relies on; the rest is kept as-is. */
 export interface OAuthAccount {
@@ -43,8 +44,14 @@ export function writeOauthAccount(path: string, account: OAuthAccount): void {
   const data = load(path);
   data.oauthAccount = account;
   for (const key of ACCOUNT_CACHE_KEYS) delete data[key];
-  const tmp = `${path}.ccswitch-${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2));
-  chmodSync(tmp, statSync(path).mode & 0o777);
-  renameSync(tmp, path);
+  writeFileAtomic(path, JSON.stringify(data, null, 2), statSync(path).mode & 0o777);
+}
+
+/**
+ * Claude Code fills in parts of oauthAccount (org name, role, rate-limit tier) a moment after
+ * sign-in, and refetches the profile now and then. True when `live` has news that `saved` lacks.
+ */
+export function profileIsNewer(live: OAuthAccount, saved: OAuthAccount): boolean {
+  const fetchedAt = (a: OAuthAccount) => (typeof a.profileFetchedAt === "number" ? a.profileFetchedAt : 0);
+  return Object.keys(live).some((k) => !(k in saved)) || fetchedAt(live) > fetchedAt(saved);
 }

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "./fs.ts";
 import type { Keychain } from "./keychain.ts";
 import type { OAuthAccount } from "./claudeJson.ts";
 
@@ -50,9 +51,7 @@ export class Vault {
 
   private writeIndex(accounts: SavedAccount[]) {
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    const tmp = `${this.indexPath}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, accounts } satisfies IndexFile, null, 2) + "\n", { mode: 0o600 });
-    renameSync(tmp, this.indexPath);
+    writeFileAtomic(this.indexPath, JSON.stringify({ version: 1, accounts } satisfies IndexFile, null, 2) + "\n", 0o600);
   }
 
   get(id: string): SavedAccount | undefined {
@@ -77,6 +76,18 @@ export class Vault {
     const rest = this.list().filter((a) => a.id !== id);
     this.writeIndex([...rest, entry]);
     return entry;
+  }
+
+  /** Replace the saved account details without touching the saved login. */
+  updateProfile(oauthAccount: OAuthAccount): void {
+    const id = accountId(oauthAccount);
+    const accounts = this.list();
+    const entry = accounts.find((a) => a.id === id);
+    if (!entry) return;
+    entry.oauthAccount = oauthAccount;
+    entry.email = oauthAccount.emailAddress;
+    entry.orgName = oauthAccount.organizationName ?? "";
+    this.writeIndex(accounts);
   }
 
   remove(id: string): boolean {

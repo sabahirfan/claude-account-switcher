@@ -4,9 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { memoryKeychain } from "../src/core/keychain.ts";
+import { fileKeychain } from "../src/core/fileStore.ts";
+import { fileLogin, keychainLogin } from "../src/core/login.ts";
 import { ACCOUNT_CACHE_KEYS } from "../src/core/claudeJson.ts";
-import { ACTIVE_SERVICE, Switcher } from "../src/core/switcher.ts";
+import { ACTIVE_SERVICE } from "../src/core/paths.ts";
+import { Switcher } from "../src/core/switcher.ts";
 import { VAULT_SERVICE } from "../src/core/vault.ts";
+
+// File modes aren't meaningful on Windows.
+const posix = process.platform !== "win32";
 
 const alice = { accountUuid: "a-1", emailAddress: "alice@example.com", organizationUuid: "org-a", organizationName: "Alice" };
 const bob = { accountUuid: "b-1", emailAddress: "bob@example.com", organizationUuid: "org-b", organizationName: "Bob Ltd" };
@@ -28,7 +34,13 @@ function setup() {
   const keychain = memoryKeychain();
   keychain.write(ACTIVE_SERVICE, "sabah", creds("org-a", "alice-1"));
   let procs: number[] = [];
-  const sw = new Switcher({ keychain, claudeJsonPath, vaultDir: join(dir, "vault"), claudeProcesses: () => procs });
+  const sw = new Switcher({
+    login: keychainLogin(keychain, ACTIVE_SERVICE, "sabah"),
+    secrets: keychain,
+    claudeJsonPath,
+    vaultDir: join(dir, "vault"),
+    claudeProcesses: () => procs,
+  });
   return { dir, claudeJsonPath, keychain, sw, setProcs: (p: number[]) => (procs = p) };
 }
 
@@ -55,7 +67,7 @@ describe("Switcher", () => {
     assert.equal(ctx.keychain.read(VAULT_SERVICE, "a-1:org-a"), creds("org-a", "alice-1"));
     const index = readFileSync(join(ctx.dir, "vault", "accounts.json"), "utf8");
     assert.ok(!index.includes("alice-1"), "index file must not contain tokens");
-    assert.equal(statSync(join(ctx.dir, "vault", "accounts.json")).mode & 0o777, 0o600);
+    if (posix) assert.equal(statSync(join(ctx.dir, "vault", "accounts.json")).mode & 0o777, 0o600);
   });
 
   it("switches both the keychain slot and oauthAccount, leaving other config untouched", () => {
@@ -74,7 +86,7 @@ describe("Switcher", () => {
     assert.equal(data.numStartups, 3);
     assert.deepEqual(data.projects, { "/x": { allowedTools: [] } });
     for (const key of ACCOUNT_CACHE_KEYS) assert.ok(!(key in data), `${key} should be dropped`);
-    assert.equal(statSync(ctx.claudeJsonPath).mode & 0o777, 0o644);
+    if (posix) assert.equal(statSync(ctx.claudeJsonPath).mode & 0o777, 0o644);
   });
 
   it("saves the outgoing login first so rotated refresh tokens are kept", () => {
@@ -163,7 +175,59 @@ describe("Switcher", () => {
     ctx.sw.saveCurrent();
     signIn(ctx, bob, creds("org-b", "bob-1"));
     ctx.keychain.remove(VAULT_SERVICE, "a-1:org-a");
-    assert.throws(() => ctx.sw.switchTo("a-1:org-a"), /missing from the Keychain/);
+    assert.throws(() => ctx.sw.switchTo("a-1:org-a"), /saved login for alice@example.com is missing/);
     assert.equal(ctx.keychain.read(ACTIVE_SERVICE, "sabah"), creds("org-b", "bob-1"));
+  });
+
+  it("fills in account details Claude Code adds after the account was saved", () => {
+    // Saved right after sign-in, before Claude Code fetched the org name.
+    const { organizationName, ...bare } = bob;
+    signIn(ctx, bare as typeof bob, creds("org-b", "bob-1"));
+    ctx.sw.saveCurrent();
+    assert.equal(ctx.sw.vault.get("b-1:org-b")?.orgName, "");
+
+    signIn(ctx, { ...bob, profileFetchedAt: 1 } as typeof bob, creds("org-b", "bob-1"));
+    const listed = ctx.sw.list().find((a) => a.id === "b-1:org-b");
+    assert.equal(listed?.orgName, organizationName);
+    assert.equal(ctx.sw.vault.get("b-1:org-b")?.oauthAccount.organizationName, organizationName);
+    assert.equal(ctx.keychain.read(VAULT_SERVICE, "b-1:org-b"), creds("org-b", "bob-1"));
+  });
+
+  it("refuses to save or restore a login format it doesn't know", () => {
+    ctx.keychain.write(ACTIVE_SERVICE, "sabah", JSON.stringify({ somethingNew: {}, organizationUuid: "org-a" }));
+    assert.throws(() => ctx.sw.saveCurrent(), /Unsupported Claude Code login format/);
+
+    ctx.sw.vault.save(bob, "not json");
+    assert.throws(() => ctx.sw.switchTo("b-1:org-b"), /Unsupported Claude Code login format/);
+    assert.equal(JSON.parse(readFileSync(ctx.claudeJsonPath, "utf8")).oauthAccount.emailAddress, "alice@example.com");
+  });
+});
+
+describe("Switcher with file storage (Linux and Windows)", () => {
+  it("switches the credentials file and keeps saved logins in 0600 files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ccswitch-file-"));
+    const claudeJsonPath = join(dir, "claude.json");
+    const credentialsFile = join(dir, "config", ".credentials.json");
+    writeFileSync(claudeJsonPath, JSON.stringify({ oauthAccount: alice }));
+    const login = fileLogin(credentialsFile);
+    login.write(creds("org-a", "alice-1"));
+    const secrets = fileKeychain(join(dir, "vault", "secrets"));
+    const sw = new Switcher({ login, secrets, claudeJsonPath, vaultDir: join(dir, "vault") });
+
+    sw.saveCurrent();
+    writeFileSync(claudeJsonPath, JSON.stringify({ oauthAccount: bob }));
+    login.write(creds("org-b", "bob-1"));
+    sw.saveCurrent();
+
+    sw.switchTo("a-1:org-a");
+    assert.equal(readFileSync(credentialsFile, "utf8"), creds("org-a", "alice-1"));
+    assert.equal(sw.current()?.email, "alice@example.com");
+    assert.equal(secrets.read(VAULT_SERVICE, "b-1:org-b"), creds("org-b", "bob-1"));
+    if (posix) {
+      assert.equal(statSync(credentialsFile).mode & 0o777, 0o600);
+      for (const id of ["a-1%3Aorg-a", "b-1%3Aorg-b"]) {
+        assert.equal(statSync(join(dir, "vault", "secrets", VAULT_SERVICE, `${id}.json`)).mode & 0o777, 0o600);
+      }
+    }
   });
 });
