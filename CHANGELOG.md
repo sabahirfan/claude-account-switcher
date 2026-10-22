@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.1
+- Renamed to **Multi Account for Claude Code**, extension ID `sabahirfan.multi-account-for-claude-code`; the old name was taken on the VS Code Marketplace. The npm package and the `ccswitch` command keep their names.
+
 ## 1.0.0
 First public release.
 

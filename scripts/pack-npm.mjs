@@ -11,7 +11,8 @@ copyFileSync("README.md", `${out}/README.md`);
 copyFileSync("LICENSE", `${out}/LICENSE`);
 
 const pkg = {
-  name: ext.name,
+  // Published to npm before the extension was renamed; npm keeps the original name.
+  name: "account-switcher-for-claude-code",
   version: ext.version,
   description: "ccswitch: switch between your Claude Code accounts from the terminal. Not affiliated with Anthropic.",
   license: ext.license,

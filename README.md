@@ -1,4 +1,4 @@
-# ccswitch: Accounts for Claude Code
+# Multi Account for Claude Code
 
 Switch between your Claude Code accounts from the VS Code status bar, or with `ccswitch` in a terminal. Works on macOS, Linux and Windows, in VS Code, Cursor, Windsurf and VSCodium.
 
@@ -13,8 +13,8 @@ Claude Code keeps one login at a time. This tool keeps a copy of each account's 
 - Nothing is sent anywhere. The tool makes no network requests and has no telemetry.
 
 ## Install
-- **VS Code**: search for *ccswitch* in Extensions, or `code --install-extension sabahirfan.account-switcher-for-claude-code`.
-- **Cursor, Windsurf, VSCodium**: the same extension is on [Open VSX](https://open-vsx.org/extension/sabahirfan/account-switcher-for-claude-code).
+- **VS Code**: search for *Multi Account for Claude Code* in Extensions, or `code --install-extension sabahirfan.multi-account-for-claude-code`.
+- **Cursor, Windsurf, VSCodium**: the same extension is on [Open VSX](https://open-vsx.org/extension/sabahirfan/multi-account-for-claude-code).
 - **Terminal only**: `npm install -g account-switcher-for-claude-code` installs the `ccswitch` command (Node 20 or newer).
 
 If you use Remote SSH, WSL or a dev container, install the extension in the remote window as well. Claude Code runs there and keeps its login there.

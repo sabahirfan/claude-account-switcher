@@ -1,8 +1,8 @@
 {
-  "name": "account-switcher-for-claude-code",
-  "displayName": "ccswitch: Accounts for Claude Code",
+  "name": "multi-account-for-claude-code",
+  "displayName": "Multi Account for Claude Code",
   "description": "Switch between your Claude Code accounts from the status bar or the ccswitch command. Not affiliated with Anthropic.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "sabahirfan",
   "private": true,
   "license": "MIT",
@@ -27,6 +27,7 @@
     "account",
     "switch",
     "multiple accounts",
+    "multi account",
     "login"
   ],
   "extensionKind": [
@@ -75,9 +76,9 @@
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test \"test/*.test.ts\"",
-    "package": "npm run build && vsce package --no-dependencies -o dist/account-switcher-for-claude-code.vsix",
+    "package": "npm run build && vsce package --no-dependencies -o dist/multi-account-for-claude-code.vsix",
     "pack-npm": "npm run build && node scripts/pack-npm.mjs",
-    "install-local": "npm run package && \"${VSCODE_CLI:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code}\" --install-extension dist/account-switcher-for-claude-code.vsix --force && ln -sf \"$PWD/dist/cli.js\" /usr/local/bin/ccswitch"
+    "install-local": "npm run package && \"${VSCODE_CLI:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code}\" --install-extension dist/multi-account-for-claude-code.vsix --force && ln -sf \"$PWD/dist/cli.js\" /usr/local/bin/ccswitch"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -24,7 +24,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      VSIX: dist/account-switcher-for-claude-code.vsix
+      VSIX: dist/multi-account-for-claude-code.vsix
       PUBLISH: ${{ github.event_name == 'push' || !inputs.dry_run }}
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
@@ -59,6 +59,13 @@ jobs:
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
+      # Before npm, so the .vsix for the Marketplace upload is there even if npm fails.
+      - name: GitHub release
+        if: env.PUBLISH == 'true' && github.event_name == 'push'
+        run: gh release create "$GITHUB_REF_NAME" "$VSIX" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: npm
         if: env.PUBLISH == 'true'
         working-directory: dist/npm
@@ -69,9 +76,3 @@ jobs:
           else
             npm publish --access public
           fi
-
-      - name: GitHub release
-        if: env.PUBLISH == 'true' && github.event_name == 'push'
-        run: gh release create "$GITHUB_REF_NAME" "$VSIX" --generate-notes
-        env:
-          GH_TOKEN: ${{ github.token }}
