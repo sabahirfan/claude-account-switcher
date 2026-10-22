@@ -1,0 +1,68 @@
+{
+  "name": "claude-account-switcher",
+  "displayName": "Claude Account Switcher",
+  "description": "Switch the Claude Code account from the status bar; add and remove saved accounts.",
+  "version": "0.1.0",
+  "publisher": "sabah-local",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sabahirfan/claude-account-switcher.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=22.6"
+  },
+  "os": [
+    "darwin"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "bin": {
+    "ccswitch": "./dist/cli.js"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeAccounts.pick",
+        "title": "Switch Account\u2026",
+        "category": "Claude Accounts"
+      },
+      {
+        "command": "claudeAccounts.add",
+        "title": "Add New Account\u2026",
+        "category": "Claude Accounts"
+      },
+      {
+        "command": "claudeAccounts.save",
+        "title": "Save Current Account",
+        "category": "Claude Accounts"
+      },
+      {
+        "command": "claudeAccounts.remove",
+        "title": "Remove Account\u2026",
+        "category": "Claude Accounts"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "package": "npm run build && vsce package --no-dependencies -o dist/claude-account-switcher.vsix",
+    "install-local": "npm run package && \"${VSCODE_CLI:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code}\" --install-extension dist/claude-account-switcher.vsix --force && ln -sf \"$PWD/dist/cli.js\" /usr/local/bin/ccswitch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}
