@@ -15,7 +15,8 @@ const pkg = {
   version: ext.version,
   description: "ccswitch: switch between your Claude Code accounts from the terminal. Not affiliated with Anthropic.",
   license: ext.license,
-  repository: ext.repository,
+  // npm's own spelling; trusted publishing compares it with the GitHub repo.
+  repository: { ...ext.repository, url: `git+${ext.repository.url}` },
   bugs: ext.bugs,
   homepage: ext.homepage,
   keywords: ext.keywords,

@@ -45,7 +45,8 @@ jobs:
 
       - run: npm run package
       - run: node scripts/pack-npm.mjs
-      - run: npm publish --dry-run
+      # pack, not publish --dry-run: that one fails for a version already on npm.
+      - run: npm pack --dry-run
         working-directory: dist/npm
 
       - name: VS Code Marketplace
